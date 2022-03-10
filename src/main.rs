@@ -11,7 +11,7 @@ use minicbor::encode::{Error, Write};
 use minicbor::{Decoder, Encoder};
 use num_bigint::BigUint;
 use serde::Deserialize;
-use tokio_cron_scheduler::{Job, JobScheduler};
+use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 use tracing::level_filters::LevelFilter;
 use tracing::{debug, error, info};
 
@@ -94,16 +94,26 @@ struct Opts {
     clean: bool,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-struct Task {
+#[derive(Deserialize)]
+struct LedgerParams {
     to: String,
     amount: u64,
     symbol: String,
-    schedule: String,
 }
 
 #[derive(Deserialize)]
-struct Tasks(Vec<Task>);
+#[serde(tag = "endpoint")]
+enum Task {
+    #[serde(alias = "ledger.send")]
+    LedgerSend {
+        schedule: String,
+        params: LedgerParams,
+    },
+}
+#[derive(Deserialize)]
+struct Tasks {
+    tasks: Vec<Task>,
+}
 
 // and we'll implement IntoIterator
 impl IntoIterator for Tasks {
@@ -111,7 +121,7 @@ impl IntoIterator for Tasks {
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
+        self.tasks.into_iter()
     }
 }
 
@@ -171,104 +181,105 @@ fn main() {
     let tasks: Tasks = serde_json::from_reader(reader).expect("Unable to read the tasks JSON file");
 
     // Connect to the MANY server
-    let client = Arc::new(ManyClient::new(&server, server_id, key).expect("Unable to create MANY client"));
+    let client =
+        Arc::new(ManyClient::new(&server, server_id, key).expect("Unable to create MANY client"));
 
-    // We should use an external thread because a Tokio runtime already exists
-    // many-rs : http.rs
-    std::thread::spawn(|| {
-        schedule(client, tasks);
-    })
-    .join()
-    .expect("Scheduling thread error");
+    schedule_tasks(client, tasks);
 }
 
-// We can't use #[tokio::main(worker_thread=...)] because we need to lookup the number of cpus at runtime
-fn schedule(client: Arc<ManyClient>, tasks: Tasks) {
-    tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(num_cpus::get() - 1) // There's already a Tokio runtime started by many-rs. We don't want to overschedule
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(async {
-            let mut sched = JobScheduler::new();
+fn decode_identity(id: String) -> Result<Identity, ManyError> {
+    let identity = if let Ok(data) = hex::decode(&id) {
+        Identity::try_from(data.as_slice())?
+    } else {
+        Identity::try_from(id)?
+    };
+    Ok(identity)
+}
 
-            for task in tasks.into_iter() {
-                let schedule = &task.schedule.clone();
-                let task = Arc::new(task);
-                let client = client.clone();
-                let result = sched.add(
-                    Job::new_async(schedule, move |_uuid, _l| {
-                        let task = task.clone();
-                        let client = client.clone();
-                        Box::pin(async move {
-                            info!("Transfering {}{} to {}", task.amount, task.symbol, task.to);
+fn schedule_ledger_send(
+    client: Arc<ManyClient>,
+    sched: &mut JobScheduler,
+    schedule: String,
+    params: LedgerParams,
+) -> Result<(), JobSchedulerError>
+{
+    let params = Arc::new(params);
+    sched.add(
+        Job::new_async(&schedule, move |_uuid, _lock| {
+            let params = params.clone();
+            let client = client.clone();
 
-
-                            let identity =
-                            if let Ok(data) = hex::decode(&task.to) {
-                                match Identity::try_from(data.as_slice()) {
-                                    Ok(mut i) => {
-                                        // if let Some(subid) = task.to.subid {
-                                        //     i = i.with_subresource_id(subid);
-                                        // }
-                                        println!("First block: {}", i);
-                                        i
-                                    }
-                                    Err(e) => {
-                                        eprintln!("Identity did not parse: {:?}", e.to_string());
-                                        std::process::exit(1);
-                                    }
-                                }
-                            } else if let Ok(mut i) = Identity::try_from(task.to.clone()) {
-                                // if let Some(subid) = o.subid {
-                                //     i = i.with_subresource_id(subid);
-                                // }
-                                println!("Second block: {}", hex::encode(&i.to_vec()));
-                                i
-                            } else {
-                                error!("Invalid identity {}", task.to);
-                                panic!("Invalid identity {}", task.to)
-                            };         
-
-                            // Execute the transaction
-                            let result =
-                                send(client, identity, BigUint::from(task.amount), task.symbol.clone());
-
-                            // Exit if the server returned an error
-                            if let Err(e) = result {
-                                error!("Error returned by server {}", e);
-                                std::process::exit(1);
-                            }
-                        })
-                    })
-                    .unwrap(),
+            Box::pin(async move {
+                info!(
+                    "Transfering {}{} to {}",
+                    params.amount, params.symbol, params.to
                 );
 
+                let id =
+                    decode_identity(params.to.clone());
+
+                if let Err(e) = id.clone() {
+                    error!("{}", e.to_string());
+                }
+                // Execute the transaction in a thread allowed to block, since the HTTP transport is blocking
+                // The maximum number of blocking thread that Tokio can spawn is 512 by default
+                let result = tokio::task::spawn_blocking(move || {
+                    let result = send(
+                        &*client,
+                        id.unwrap(),
+                        BigUint::from(params.amount),
+                        params.symbol.clone(),
+                    );
+
+                    if let Err(e) = result {
+                        error!("{}", e.to_string());
+                    }
+                })
+                .await;
+
                 if let Err(e) = result {
-                    error!("Job scheduler error {:?}", e);
-                    std::process::exit(1);
+                    error!("{}", e.to_string());
+                }
+            })
+        })
+        .unwrap()
+    )?;
+    Ok(())
+}
+
+#[tokio::main]
+async fn schedule_tasks(client: Arc<ManyClient>, tasks: Tasks) {
+    let mut sched = JobScheduler::new();
+
+    for task in tasks.into_iter() {
+        match task {
+            Task::LedgerSend { schedule, params } => {
+                let result = schedule_ledger_send(client.clone(), &mut sched, schedule, params);
+                if let Err(e) = result {
+                    error!("Scheduling error {:?}", e);
                 }
             }
+        }
+    }
 
-            info!("Starting cron scheduler");
-            // 500ms tick
-            let results = sched.start().await;
-            if let Err(e) = results {
-                error!("Async join error {}", e);
-                std::process::exit(1);
-            }
-        });
+    info!("Starting cron scheduler");
+    // 500ms tick
+    let results = sched.start().await;
+    if let Err(e) = results {
+        error!("Async join error {}", e);
+        std::process::exit(1);
+    }
 }
 
 // Taken from omni-ledger/src/ledger/main.rs
 // TODO: DRY
 fn send(
-    client: Arc<ManyClient>,
+    client: &ManyClient,
     to: Identity,
     amount: BigUint,
     symbol: String,
 ) -> Result<(), ManyError> {
-    let symbol = resolve_symbol(&client, symbol)?;
+    let symbol = resolve_symbol(client, symbol)?;
 
     if client.id.identity.is_anonymous() {
         Err(ManyError::invalid_identity())
