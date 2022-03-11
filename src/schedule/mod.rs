@@ -4,20 +4,28 @@ use tracing::{error, info};
 
 use std::sync::Arc;
 
+use crate::storage::CronStorage;
 use crate::tasks::*;
 
 mod ledger;
 use ledger::schedule_ledger_send;
 
 #[tokio::main]
-pub async fn schedule_tasks(client: ManyClient, tasks: Tasks) {
+pub async fn schedule_tasks(client: ManyClient, tasks: Tasks, storage: CronStorage) {
     let mut sched = JobScheduler::new();
     let client = Arc::new(client);
+    let storage = Arc::new(storage);
 
     for task in tasks.into_iter() {
         match task {
             Task::LedgerSend(ls) => {
-                let result = schedule_ledger_send(client.clone(), &mut sched, ls.schedule, ls.params);
+                let result = schedule_ledger_send(
+                    client.clone(),
+                    &mut sched,
+                    storage.clone(),
+                    ls.schedule,
+                    ls.params,
+                );
                 if let Err(e) = result {
                     error!("Scheduling error {:?}", e);
                 }

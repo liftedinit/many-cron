@@ -7,9 +7,8 @@ pub struct LedgerParams {
     pub symbol: String,
 }
 
-
 #[derive(Deserialize)]
 pub struct LedgerSend {
-        pub schedule: String,
-        pub params: LedgerParams,
+    pub schedule: String,
+    pub params: LedgerParams,
 }

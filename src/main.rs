@@ -1,22 +1,23 @@
 use clap::Parser;
-use many::Identity;
 use many::types::identity::cose::CoseKeyIdentity;
+use many::Identity;
 use many_client::ManyClient;
-use tracing::level_filters::LevelFilter;
 use tracing::debug;
+use tracing::level_filters::LevelFilter;
 
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
 
 mod lib;
+mod schedule;
 mod storage;
 mod tasks;
-mod schedule;
 
-use tasks::*;
 use schedule::schedule_tasks;
+use tasks::*;
 
+use crate::storage::CronStorage;
 
 #[derive(Parser, Debug)]
 struct Opts {
@@ -41,7 +42,7 @@ struct Opts {
 
     /// Path to a persistent store database (rocksdb).
     #[clap(long)]
-    persistent: Option<PathBuf>,
+    persistent: PathBuf,
 
     /// Path to a task list
     #[clap(long)]
@@ -80,16 +81,12 @@ fn main() {
 
     if clean {
         // Delete the persistent storage
-        if let Some(persistent_path) = persistent {
-            match std::fs::remove_dir_all(persistent_path) {
-                Ok(_) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => {
-                    panic!("Error: {}", e)
-                }
+        match std::fs::remove_dir_all(persistent.as_path()) {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                panic!("Error: {}", e)
             }
-        } else {
-            panic!("Unable to execute --clean without --persistent")
         }
     }
 
@@ -102,7 +99,6 @@ fn main() {
     // Server ID is either something of None
     let server_id = server_id.unwrap_or_default();
 
-    // TODO: Load tasks from JSON here
     let json_file = File::open(tasks).expect("Unable to open tasks JSON file");
     let reader = BufReader::new(json_file);
     let tasks: Tasks = serde_json::from_reader(reader).expect("Unable to read the tasks JSON file");
@@ -110,5 +106,7 @@ fn main() {
     // Connect to the MANY server
     let client = ManyClient::new(&server, server_id, key).expect("Unable to create MANY client");
 
-    schedule_tasks(client, tasks);
+    let storage = CronStorage::new(persistent).expect("Unable to create permanent storage");
+
+    schedule_tasks(client, tasks, storage);
 }
