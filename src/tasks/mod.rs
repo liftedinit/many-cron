@@ -1,17 +1,22 @@
 use serde::Deserialize;
 
-use self::ledger::LedgerSend;
+use self::ledger::LedgerSendParams;
 
 pub mod ledger;
 
 #[derive(Deserialize)]
-#[serde(tag = "endpoint")]
-pub enum Task {
+#[serde(tag = "endpoint", content = "params")]
+pub enum Params {
     #[serde(alias = "ledger.send")]
-    LedgerSend(LedgerSend),
+    LedgerSend(LedgerSendParams),
 }
 #[derive(Deserialize)]
-
+pub struct Task {
+    pub schedule: String,
+    #[serde(flatten)]
+    pub params: Params,
+}
+#[derive(Deserialize)]
 pub struct Tasks {
     tasks: Vec<Task>,
 }

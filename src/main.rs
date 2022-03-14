@@ -2,17 +2,18 @@ use clap::Parser;
 use many::types::identity::cose::CoseKeyIdentity;
 use many::Identity;
 use many_client::ManyClient;
-use tracing::debug;
 use tracing::level_filters::LevelFilter;
+use tracing::{debug, error};
 
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
 
-mod lib;
+mod errors;
 mod schedule;
 mod storage;
 mod tasks;
+mod utils;
 
 use schedule::schedule_tasks;
 use tasks::*;
@@ -108,5 +109,12 @@ fn main() {
 
     let storage = CronStorage::new(persistent).expect("Unable to create permanent storage");
 
-    schedule_tasks(client, tasks, storage);
+    let res = schedule_tasks(client, tasks, storage);
+    if let Err(e) = res {
+        error!("Task scheduling error {e}");
+        std::process::exit(1);
+    }
+
+    //TODO: Handle Ctrl-C signal
+    //TODO: Handle graceful shutdown
 }

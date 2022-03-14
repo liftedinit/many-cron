@@ -4,72 +4,44 @@ use many::types::ledger::TokenAmount;
 use many::{Identity, ManyError};
 use many_client::ManyClient;
 use num_bigint::BigUint;
-use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
-use tracing::{error, info};
+use tracing::info;
 
 use std::str::FromStr;
 
 use std::sync::Arc;
 
-use crate::lib::decode_identity;
+use crate::errors;
 use crate::storage::CronStorage;
-use crate::tasks::ledger::LedgerParams;
+use crate::tasks::ledger::LedgerSendParams;
+use crate::utils::decode_identity;
 
-pub fn schedule_ledger_send(
+pub async fn ledger_send(
     client: Arc<ManyClient>,
-    sched: &mut JobScheduler,
     storage: Arc<CronStorage>,
-    schedule: String,
-    params: LedgerParams,
-) -> Result<(), JobSchedulerError> {
-    let params = Arc::new(params);
-    sched.add(
-        Job::new_async(&schedule, move |_uuid, _lock| {
-            let params = params.clone();
-            let client = client.clone();
-            let storage = storage.clone();
+    params: LedgerSendParams,
+) -> Result<(), ManyError> {
+    let id = decode_identity(params.to.clone())?;
 
-            Box::pin(async move {
-                let id = decode_identity(params.to.clone());
+    // Execute the transaction in a thread allowed to block, since the HTTP transport is blocking
+    // The maximum number of blocking thread that Tokio can spawn is 512 by default
+    let response = tokio::task::spawn_blocking(move || {
+        info!(
+            "Transfering {}{} to {}",
+            params.amount, params.symbol, params.to
+        );
+        send(
+            &client,
+            id,
+            BigUint::from(params.amount),
+            params.symbol.clone(),
+        )
+    })
+    .await
+    .map_err(|e| errors::job_error(format!("{:?}", e)))?
+    .map_err(|e| errors::ledger_send_error(e.to_string()))?;
 
-                if let Err(e) = id.clone() {
-                    error!("{}", e.to_string());
-                }
-                // Execute the transaction in a thread allowed to block, since the HTTP transport is blocking
-                // The maximum number of blocking thread that Tokio can spawn is 512 by default
-                let result = tokio::task::spawn_blocking(move || {
-                    info!(
-                        "Transfering {}{} to {}",
-                        params.amount, params.symbol, params.to
-                    );
-                    send(
-                        &client,
-                        id.unwrap(),
-                        BigUint::from(params.amount),
-                        params.symbol.clone(),
-                    )
-                })
-                .await;
+    storage.push(response).await;
 
-                let result = match result {
-                    Ok(response) => response,
-                    Err(e) => {
-                        panic!("Tokio JoinError: {}", e)
-                    }
-                };
-
-                let response = match result {
-                    Ok(response) => response,
-                    Err(e) => {
-                        panic!("Transaction response error: {e}")
-                    }
-                };
-
-                storage.push(response).await;
-            })
-        })
-        .unwrap(),
-    )?;
     Ok(())
 }
 
