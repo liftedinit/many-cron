@@ -16,6 +16,9 @@ use crate::errors;
 mod ledger;
 use ledger::ledger_send;
 
+/// Wait this amount of second before exiting the application when a shutdown signal is received
+const SHUTDOWN_DELAY: u64 = 5;
+
 /// Schedule tasks in the Tokio cron scheduler
 ///
 /// You need to add new task handlers here
@@ -26,6 +29,21 @@ pub async fn schedule_tasks(
     storage: CronStorage,
 ) -> Result<(), ManyError> {
     let mut sched = JobScheduler::new();
+
+    // Shutdown gracefully. Wait some amount of time for the task to finish
+    // We want to make sure we register the response in the persistent storage
+    sched.shutdown_on_ctrl_c();
+    sched
+        .set_shutdown_handler(Box::new(|| {
+            Box::pin(async move {
+                info!("Shutting down... Waiting {SHUTDOWN_DELAY} secs for tasks to finish");
+                tokio::time::sleep(tokio::time::Duration::from_secs(SHUTDOWN_DELAY)).await;
+                info!("Goodbye!");
+                std::process::exit(0);
+            })
+        }))
+        .map_err(|e| errors::scheduler_error(format!("{:?}", e)))?;
+
     let client = Arc::new(client);
     let storage = Arc::new(storage);
 
