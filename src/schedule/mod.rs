@@ -1,3 +1,5 @@
+//! Task scheduling and handlers
+
 use many::ManyError;
 use many_client::ManyClient;
 use tokio_cron_scheduler::{Job, JobScheduler};
@@ -14,6 +16,9 @@ use crate::errors;
 mod ledger;
 use ledger::ledger_send;
 
+/// Schedule tasks in the Tokio cron scheduler
+///
+/// You need to add new task handlers here
 #[tokio::main]
 pub async fn schedule_tasks(
     client: ManyClient,

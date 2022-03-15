@@ -1,3 +1,5 @@
+//! Task handlers and utilities for the `Ledger` MANY component
+
 use many::message::ResponseMessage;
 use many::server::module::ledger::{InfoReturns, SendArgs};
 use many::types::ledger::TokenAmount;
@@ -15,6 +17,7 @@ use crate::storage::CronStorage;
 use crate::tasks::ledger::LedgerSendParams;
 use crate::utils::decode_identity;
 
+/// Handles the `ledger.send` task to transfer some amount from one account to another
 pub async fn ledger_send(
     client: Arc<ManyClient>,
     storage: Arc<CronStorage>,
@@ -40,13 +43,15 @@ pub async fn ledger_send(
     .map_err(|e| errors::job_error(format!("{:?}", e)))?
     .map_err(|e| errors::ledger_send_error(e.to_string()))?;
 
-    storage.push(response).await;
+    storage.push(response).await?;
 
     Ok(())
 }
 
-// Inspired from many-framework/src/ledger/main.rs
-// TODO: DRY
+/// Performs the actual `ledger.send` transaction
+///
+/// Inspired from many-framework/src/ledger/main.rs
+/// TODO: DRY
 pub fn send(
     client: &ManyClient,
     to: Identity,
@@ -69,8 +74,10 @@ pub fn send(
     }
 }
 
-// Taken from many-framework/src/ledger/main.rs
-// TODO: DRY
+/// Request the list of supported symbols from the server and make sure the symbol we're using is valid
+///
+/// Taken from many-framework/src/ledger/main.rs
+/// TODO: DRY
 fn resolve_symbol(client: &ManyClient, symbol: String) -> Result<Identity, ManyError> {
     if let Ok(symbol) = Identity::from_str(&symbol) {
         Ok(symbol)
