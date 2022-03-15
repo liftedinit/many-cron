@@ -114,7 +114,4 @@ fn main() {
         error!("Task scheduling error {e}");
         std::process::exit(1);
     }
-
-    //TODO: Handle Ctrl-C signal
-    //TODO: Handle graceful shutdown
 }
