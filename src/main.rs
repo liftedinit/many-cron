@@ -91,20 +91,15 @@ fn main() {
         }
     }
 
-    // Load the PEM key file
     let pem = std::fs::read_to_string(&pem).expect("Could not read PEM file.");
-
-    // Create the COSE identity from the PEM key
     let key = CoseKeyIdentity::from_pem(&pem).expect("Could not create COSE identity from PEM");
 
-    // Server ID is either something of None
     let server_id = server_id.unwrap_or_default();
 
     let json_file = File::open(tasks).expect("Unable to open tasks JSON file");
     let reader = BufReader::new(json_file);
     let tasks: Tasks = serde_json::from_reader(reader).expect("Unable to read the tasks JSON file");
 
-    // Connect to the MANY server
     let client = ManyClient::new(&server, server_id, key).expect("Unable to create MANY client");
 
     let storage = CronStorage::new(persistent).expect("Unable to create permanent storage");
