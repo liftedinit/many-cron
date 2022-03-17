@@ -13,7 +13,6 @@ mod errors;
 mod schedule;
 mod storage;
 mod tasks;
-mod utils;
 
 use schedule::schedule_tasks;
 use tasks::*;

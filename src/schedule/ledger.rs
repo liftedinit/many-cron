@@ -9,13 +9,11 @@ use num_bigint::BigUint;
 use tracing::info;
 
 use std::str::FromStr;
-
 use std::sync::Arc;
 
 use crate::errors;
 use crate::storage::CronStorage;
 use crate::tasks::ledger::LedgerSendParams;
-use crate::utils::decode_identity;
 
 /// Handles the `ledger.send` task to transfer some amount from one account to another
 pub async fn ledger_send(
@@ -23,8 +21,6 @@ pub async fn ledger_send(
     storage: Arc<CronStorage>,
     params: LedgerSendParams,
 ) -> Result<(), ManyError> {
-    let id = decode_identity(params.to.clone())?;
-
     // Execute the transaction in a thread allowed to block, since the HTTP transport is blocking
     // The maximum number of blocking thread that Tokio can spawn is 512 by default
     let response = tokio::task::spawn_blocking(move || {
@@ -34,7 +30,7 @@ pub async fn ledger_send(
         );
         send(
             &client,
-            id,
+            params.to,
             BigUint::from(params.amount),
             params.symbol.clone(),
         )
@@ -43,7 +39,7 @@ pub async fn ledger_send(
     .map_err(|e| errors::job_error(format!("{:?}", e)))?
     .map_err(|e| errors::ledger_send_error(e.to_string()))?;
 
-    storage.push(response).await?;
+    storage.push_response(response).await?;
 
     Ok(())
 }

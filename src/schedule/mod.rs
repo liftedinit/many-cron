@@ -59,12 +59,17 @@ pub async fn schedule_tasks(
             Box::pin(async move {
                 let result = match params.as_ref() {
                     Params::LedgerSend(params) => {
-                        ledger_send(client, storage, LedgerSendParams::clone(params)).await
+                        ledger_send(client.clone(), storage.clone(), LedgerSendParams::clone(params)).await
                         //TODO: Can we propagate this error using '?'?
                     }
                 };
 
                 if let Err(e) = result {
+                    // Storing the transaction error in the persistent storage
+                    let result = storage.push_error(e.clone(), Some(client.id.identity)).await;
+                    if let Err(er) = result {
+                        panic!("Unable to store error to persistent storage: {er}");
+                    }
                     panic!("Unable to schedule job {e}")
                 }
             })

@@ -7,10 +7,10 @@ use self::ledger::LedgerSendParams;
 pub mod ledger;
 
 /// Task parameters for different task types
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "endpoint", content = "params")]
 pub enum Params {
-    #[serde(alias = "ledger.send")]
+    #[serde(alias = "ledger.send", deserialize_with = "ledger::from_cbor")]
     LedgerSend(LedgerSendParams),
 }
 
@@ -41,6 +41,8 @@ impl IntoIterator for Tasks {
 #[cfg(test)]
 mod tests {
     use super::{Params, Tasks};
+    use many::{types::ledger::TokenAmount, Identity};
+    use std::str::FromStr;
 
     #[test]
     fn deserialize_ledger_send() {
@@ -50,11 +52,7 @@ mod tests {
                 {
                     "schedule": "1/5 * * * * *",
                     "endpoint": "ledger.send",
-                    "params": {
-                        "to": "oaa",
-                        "amount": 10,
-                        "symbol": "FBT"
-                    }
+                    "params": "{1: \"oaa\", 2: 10, 3: \"FBT\"}"
                 }
             ]
         }
@@ -67,8 +65,8 @@ mod tests {
 
         match task.params {
             Params::LedgerSend(p) => {
-                assert_eq!(p.to, "oaa".to_string());
-                assert_eq!(p.amount, 10);
+                assert_eq!(p.to, Identity::from_str("oaa").unwrap());
+                assert_eq!(p.amount, TokenAmount::from(10u16));
                 assert_eq!(p.symbol, "FBT".to_string());
             }
         }
