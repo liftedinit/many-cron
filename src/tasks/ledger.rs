@@ -20,7 +20,7 @@ pub struct LedgerSendParams {
 
 /// Deserialize CBOR string from JSON
 /// TODO: Make this generic?
-pub (crate) fn from_cbor<'de, D>(deserializer: D) -> Result<LedgerSendParams, D::Error>
+pub(crate) fn from_cbor<'de, D>(deserializer: D) -> Result<LedgerSendParams, D::Error>
 where
     D: Deserializer<'de>,
 {

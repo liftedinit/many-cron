@@ -38,7 +38,11 @@ impl CronStorage {
     }
 
     /// Store a new error in the database and display the entry after storage
-    pub async fn push_error(&self, error: ManyError, from: Option<Identity>) -> Result<(), ManyError> {
+    pub async fn push_error(
+        &self,
+        error: ManyError,
+        from: Option<Identity>,
+    ) -> Result<(), ManyError> {
         let mut lock = self.persistent_store.lock().await;
         let key = self.get_error_key(from);
         lock.apply(&[(
