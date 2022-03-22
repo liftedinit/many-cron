@@ -3,18 +3,12 @@
 use many::ManyError;
 use many_client::ManyClient;
 use tokio_cron_scheduler::{Job, JobScheduler};
-use tracing::info;
+use tracing::{error, info};
 
 use std::sync::Arc;
 
-use crate::storage::CronStorage;
-use crate::tasks::ledger::LedgerSendParams;
-use crate::tasks::*;
-
 use crate::errors;
-
-mod ledger;
-use ledger::ledger_send;
+use crate::tasks::Tasks;
 
 /// Wait this amount of second before exiting the application when a shutdown signal is received
 const SHUTDOWN_DELAY: u64 = 5;
@@ -23,15 +17,10 @@ const SHUTDOWN_DELAY: u64 = 5;
 ///
 /// You need to add new task handlers here
 #[tokio::main]
-pub async fn schedule_tasks(
-    client: ManyClient,
-    tasks: Tasks,
-    storage: CronStorage,
-) -> Result<(), ManyError> {
+pub async fn schedule_tasks(client: ManyClient, tasks: Tasks) -> Result<(), ManyError> {
     let mut sched = JobScheduler::new();
 
     // Shutdown gracefully. Wait some amount of time for the task to finish
-    // We want to make sure we register the response in the persistent storage
     sched.shutdown_on_ctrl_c();
     sched
         .set_shutdown_handler(Box::new(|| {
@@ -39,45 +28,27 @@ pub async fn schedule_tasks(
                 info!("Shutting down... Waiting {SHUTDOWN_DELAY} secs for tasks to finish");
                 tokio::time::sleep(tokio::time::Duration::from_secs(SHUTDOWN_DELAY)).await;
                 info!("Goodbye!");
-                std::process::exit(0);
+                // TODO: Use channels/broadcast here?
+                std::process::exit(0); // This is required for the application to stop...
             })
         }))
         .map_err(|e| errors::scheduler_error(format!("{:?}", e)))?;
 
     let client = Arc::new(client);
-    let storage = Arc::new(storage);
 
     info!("Adding tasks to scheduler");
     for task in tasks.into_iter() {
         let client = client.clone();
-        let storage = storage.clone();
-        let params = Arc::new(task.params);
-        let job = Job::new_async(&task.schedule, move |_uuid, _lock| {
+        let job = Job::new_async(&task.schedule.clone(), move |_uuid, _lock| {
             let client = client.clone();
-            let storage = storage.clone();
-            let params = params.clone();
+            let task = task.clone();
             Box::pin(async move {
-                let result = match params.as_ref() {
-                    Params::LedgerSend(params) => {
-                        ledger_send(
-                            client.clone(),
-                            storage.clone(),
-                            LedgerSendParams::clone(params),
-                        )
-                        .await
-                        //TODO: Can we propagate this error using '?'?
-                    }
-                };
-
+                // TODO: Can I propage the error using '?'?
+                let result = task.execute(client).await;
                 if let Err(e) = result {
-                    // Storing the transaction error in the persistent storage
-                    let result = storage
-                        .push_error(e.clone(), Some(client.id.identity))
-                        .await;
-                    if let Err(er) = result {
-                        panic!("Unable to store error to persistent storage: {er}");
-                    }
-                    panic!("Unable to schedule job {e}")
+                    error!("Task execution error {e}");
+                } else {
+                    info!("{:?}", result.unwrap());
                 }
             })
         })

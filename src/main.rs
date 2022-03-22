@@ -11,13 +11,10 @@ use std::path::PathBuf;
 
 mod errors;
 mod schedule;
-mod storage;
 mod tasks;
 
 use schedule::schedule_tasks;
 use tasks::*;
-
-use crate::storage::CronStorage;
 
 #[derive(Parser, Debug)]
 struct Opts {
@@ -40,19 +37,11 @@ struct Opts {
     #[clap(short, long, parse(from_occurrences))]
     quiet: i8,
 
-    /// Path to a persistent store database (rocksdb).
-    #[clap(long)]
-    persistent: PathBuf,
-
     /// Path to a task list
     #[clap(long)]
     tasks: PathBuf,
-
-    /// Delete the persistent storage to start from a clean state.
-    /// If this is not specified the initial state will not be used.
-    #[clap(long, short)]
-    clean: bool,
 }
+
 fn main() {
     let Opts {
         server,
@@ -60,9 +49,7 @@ fn main() {
         pem,
         verbose,
         quiet,
-        persistent,
         tasks,
-        clean,
     } = Opts::parse();
 
     let verbose_level = 2 + verbose - quiet;
@@ -79,17 +66,6 @@ fn main() {
 
     debug!("{:?}", Opts::parse());
 
-    if clean {
-        // Delete the persistent storage
-        match std::fs::remove_dir_all(persistent.as_path()) {
-            Ok(_) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => {
-                panic!("Error: {}", e)
-            }
-        }
-    }
-
     let pem = std::fs::read_to_string(&pem).expect("Could not read PEM file.");
     let key = CoseKeyIdentity::from_pem(&pem).expect("Could not create COSE identity from PEM");
 
@@ -101,9 +77,7 @@ fn main() {
 
     let client = ManyClient::new(&server, server_id, key).expect("Unable to create MANY client");
 
-    let storage = CronStorage::new(persistent).expect("Unable to create permanent storage");
-
-    let res = schedule_tasks(client, tasks, storage);
+    let res = schedule_tasks(client, tasks);
     if let Err(e) = res {
         error!("Task scheduling error {e}");
         std::process::exit(1);

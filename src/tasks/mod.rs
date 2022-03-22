@@ -1,25 +1,40 @@
 //! Define new task types and how to deserialize them
 
+use many::ManyError;
+use many::{message::ResponseMessage, server::module::ledger::SendArgs};
+use many_client::ManyClient;
 use serde::Deserialize;
 
-use self::ledger::LedgerSendParams;
+use std::sync::Arc;
 
 pub mod ledger;
 
 /// Task parameters for different task types
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(tag = "endpoint", content = "params")]
 pub enum Params {
     #[serde(alias = "ledger.send", deserialize_with = "ledger::from_cbor")]
-    LedgerSend(LedgerSendParams),
+    LedgerSend(SendArgs),
 }
 
 /// The base Task type
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Task {
     pub schedule: String,
     #[serde(flatten)]
     pub params: Params,
+}
+
+impl Task {
+    /// Execute the task. The function executed will depends on the task parameter type.
+    pub(crate) async fn execute(
+        self,
+        client: Arc<ManyClient>,
+    ) -> Result<ResponseMessage, ManyError> {
+        match self.params {
+            Params::LedgerSend(p) => ledger::send(client, p).await,
+        }
+    }
 }
 
 /// A simple task collection
@@ -52,7 +67,7 @@ mod tests {
                 {
                     "schedule": "1/5 * * * * *",
                     "endpoint": "ledger.send",
-                    "params": "{1: \"oaa\", 2: 10, 3: \"FBT\"}"
+                    "params": "{1: \"oag4ug633ael65rftbhxu3sy7flqqrpdws372cpbqqupmtmat4\", 2: 10, 3: \"oqbfbahksdwaqeenayy2gxke32hgb7aq4ao4wt745lsfs6wiaaaaqnz\"}"
                 }
             ]
         }
@@ -65,9 +80,17 @@ mod tests {
 
         match task.params {
             Params::LedgerSend(p) => {
-                assert_eq!(p.to, Identity::from_str("oaa").unwrap());
+                assert_eq!(
+                    p.to,
+                    Identity::from_str("oag4ug633ael65rftbhxu3sy7flqqrpdws372cpbqqupmtmat4")
+                        .unwrap()
+                );
                 assert_eq!(p.amount, TokenAmount::from(10u16));
-                assert_eq!(p.symbol, "FBT".to_string());
+                assert_eq!(
+                    p.symbol,
+                    Identity::from_str("oqbfbahksdwaqeenayy2gxke32hgb7aq4ao4wt745lsfs6wiaaaaqnz")
+                        .unwrap()
+                );
             }
         }
     }
