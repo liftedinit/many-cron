@@ -29,6 +29,7 @@ pub async fn schedule_tasks(client: ManyClient, tasks: Tasks) -> Result<(), Many
                 tokio::time::sleep(tokio::time::Duration::from_secs(SHUTDOWN_DELAY)).await;
                 info!("Goodbye!");
                 // TODO: Use channels/broadcast here?
+                // See https://github.com/mvniekerk/tokio-cron-scheduler/issues/14
                 std::process::exit(0); // This is required for the application to stop...
             })
         }))
