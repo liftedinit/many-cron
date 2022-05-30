@@ -67,7 +67,7 @@ mod tests {
                 {
                     "schedule": "1/5 * * * * *",
                     "endpoint": "ledger.send",
-                    "params": "{1: \"oag4ug633ael65rftbhxu3sy7flqqrpdws372cpbqqupmtmat4\", 2: 10, 3: \"oqbfbahksdwaqeenayy2gxke32hgb7aq4ao4wt745lsfs6wiaaaaqnz\"}"
+                    "params": "{1: \"mag4ug633ael65rftbhxu3sy7flqqrpdws372cpbqqupmtmat4\", 2: 10, 3: \"mqbfbahksdwaqeenayy2gxke32hgb7aq4ao4wt745lsfs6wiaaaaqnz\"}"
                 }
             ]
         }
@@ -82,13 +82,13 @@ mod tests {
             Params::LedgerSend(p) => {
                 assert_eq!(
                     p.to,
-                    Identity::from_str("oag4ug633ael65rftbhxu3sy7flqqrpdws372cpbqqupmtmat4")
+                    Identity::from_str("mag4ug633ael65rftbhxu3sy7flqqrpdws372cpbqqupmtmat4")
                         .unwrap()
                 );
                 assert_eq!(p.amount, TokenAmount::from(10u16));
                 assert_eq!(
                     p.symbol,
-                    Identity::from_str("oqbfbahksdwaqeenayy2gxke32hgb7aq4ao4wt745lsfs6wiaaaaqnz")
+                    Identity::from_str("mqbfbahksdwaqeenayy2gxke32hgb7aq4ao4wt745lsfs6wiaaaaqnz")
                         .unwrap()
                 );
             }
